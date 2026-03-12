@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Thermostat</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.4.0/math.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; background: #0a0a0f; color: #e0e0e0; padding: 24px; max-width: 900px; margin: 0 auto; }
+h1 { font-size: 18px; font-weight: 600; margin-bottom: 20px; color: #a0a0b0; }
+
+.controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+.row { display: flex; gap: 10px; align-items: end; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #808090; text-transform: uppercase; letter-spacing: 0.5px; }
+textarea { width: 100%; height: 60px; background: #14141f; border: 1px solid #2a2a3a; border-radius: 6px; color: #e0e0e0; padding: 8px 10px; font: inherit; font-size: 13px; resize: vertical; }
+input[type="text"], input[type="number"] { background: #14141f; border: 1px solid #2a2a3a; border-radius: 6px; color: #e0e0e0; padding: 8px 10px; font: inherit; font-size: 13px; }
+input[type="text"] { flex: 1; }
+input[type="number"] { width: 70px; }
+button { background: #3a3a5a; border: 1px solid #4a4a6a; border-radius: 6px; color: #e0e0e0; padding: 8px 16px; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+button:hover { background: #4a4a6a; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.error { color: #ff6b6b; font-size: 12px; margin-top: 4px; min-height: 16px; }
+
+#graph-container { position: relative; margin-bottom: 16px; }
+canvas { width: 100%; height: 160px; background: #14141f; border-radius: 6px; border: 1px solid #2a2a3a; display: block; }
+.graph-controls { position: absolute; top: 8px; right: 8px; display: flex; gap: 8px; }
+.graph-controls label { flex-direction: row; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+.graph-controls input[type="checkbox"] { accent-color: #888; }
+
+#output { background: #14141f; border: 1px solid #2a2a3a; border-radius: 6px; padding: 16px; min-height: 80px; font-size: 14px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
+#output .token { cursor: pointer; border-radius: 2px; padding: 0 1px; transition: outline 0.1s; }
+#output .token.hovered { outline: 2px solid rgba(255,255,255,0.5); }
+
+.tooltip { position: fixed; background: #1e1e2e; border: 1px solid #3a3a5a; border-radius: 6px; padding: 6px 10px; font-size: 11px; pointer-events: none; z-index: 100; line-height: 1.5; white-space: nowrap; }
+
+.overlay-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; display: none; align-items: center; justify-content: center; }
+.overlay-backdrop.open { display: flex; }
+.overlay { background: #14141f; border: 1px solid #2a2a3a; border-radius: 10px; max-width: 640px; width: 90%; max-height: 80vh; overflow-y: auto; padding: 24px; }
+.overlay h2 { font-size: 15px; font-weight: 600; color: #c0c0d0; margin-bottom: 12px; }
+.overlay p { font-size: 13px; color: #9090a0; line-height: 1.6; margin-bottom: 12px; }
+.overlay code { background: #1e1e2e; padding: 1px 5px; border-radius: 3px; color: #c8c8e0; font-size: 12px; }
+.overlay table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.overlay th { text-align: left; color: #808090; font-weight: 500; padding: 6px 8px; border-bottom: 1px solid #2a2a3a; }
+.overlay td { padding: 5px 8px; border-bottom: 1px solid #1a1a2a; color: #c0c0d0; }
+.overlay td:first-child { white-space: nowrap; color: #a0a0e0; }
+.fn-help-link { color: #7070a0; font-size: 11px; cursor: pointer; border-bottom: 1px dotted #7070a0; }
+.fn-help-link:hover { color: #9090c0; }
+</style>
+</head>
+<body>
+<h1>Thermostat</h1>
+
+<div class="controls">
+  <label>Prompt
+    <textarea id="prompt">The things I could never live without:</textarea>
+  </label>
+  <div class="row">
+    <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+      <span class="fn-help-link" id="fn-help-open">Temperature function reference</span>
+      <input type="text" id="tempfn" value="stay01(i / 10, 6, 0, 8) * 2.0" placeholder="e.g. 0.3 + 0.7 * sin(i / 20)">
+    </div>
+    <label>Max tokens
+      <input type="number" id="maxtokens" value="200" min="1" max="200">
+    </label>
+    <button id="generate">Generate</button>
+    <button id="stop" style="display:none">Stop</button>
+  </div>
+  <div class="error" id="error"></div>
+  <div style="display:flex;gap:12px;margin-top:4px;align-items:center">
+    <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="ctx-window" checked> context window
+      <input type="number" id="ctx-window-size" value="10" min="1" max="200" style="width:50px"> tokens</label>
+  </div>
+</div>
+
+<div id="graph-container">
+  <canvas id="graph"></canvas>
+  <div class="graph-controls">
+    <label><input type="checkbox" id="show-entropy" checked> entropy</label>
+  </div>
+</div>
+
+<div id="output"></div>
+<div class="tooltip" id="tooltip" style="display:none"></div>
+
+<script>
+math.import({
+  map: math.typed('map', { 'number,number,number,number,number': (v, lo1, hi1, lo2, hi2) => lo2 + (v - lo1) * (hi2 - lo2) / (hi1 - lo1) }),
+  map01: math.typed('map01', { 'number,number,number': (v, lo, hi) => lo + v * (hi - lo) }),
+  sin01: math.typed('sin01', { 'number': v => (Math.sin(v) + 1) * 0.5 }),
+  sin01ma: math.typed('sin01ma', { 'number,number,number,number,number': (t, period, offset, m, a) => (Math.sin((t + offset) / period * 2 * Math.PI) + 1) * 0.5 * m + a }),
+  triangle: math.typed('triangle', { 'number': t => 2 * Math.abs((t + 0.5) % 1 - 0.5) }),
+  square: math.typed('square', { 'number': t => (t % 1) >= 0.5 ? 1 : 0 }),
+  step: math.typed('step', { 'number,number': (edge, x) => x < edge ? 0 : 1 }),
+  smoothstep: math.typed('smoothstep', { 'number,number,number': (lo, hi, x) => { const t = Math.max(0, Math.min((x - lo) / (hi - lo), 1)); return t * t * (3 - 2 * t); } }),
+  snap: math.typed('snap', { 'number,number': (v, s) => Math.floor(v / s) * s }),
+  smin: math.typed('smin', { 'number,number,number': (a, b, k) => -Math.log2(Math.pow(2, -k * a) + Math.pow(2, -k * b)) / k }),
+  noise: math.typed('noise', { 'number': x => { const s = Math.sin(x * 12.9898) * 43758.5453; return s - Math.floor(s); } }),
+  stay01: math.typed('stay01', { 'number,number,number,number': (t, period, offset, power) => {
+    const wave = Math.sin((t + offset) / period * 2 * Math.PI);
+    const s = Math.sign(wave);
+    return (s - s * Math.pow(1 - Math.abs(wave), power) + 1) / 2;
+  }}),
+  stay: math.typed('stay', { 'number,number,number,number,number,number': (t, lo, hi, period, offset, power) => {
+    const wave = Math.sin((t + offset) / period * 2 * Math.PI);
+    const s = Math.sign(wave);
+    const v01 = (s - s * Math.pow(1 - Math.abs(wave), power) + 1) / 2;
+    return v01 * (hi - lo) + lo;
+  }}),
+  mix: math.typed('mix', { 'number,number,number': (a, b, t) => a + (b - a) * t }),
+  clamp: math.typed('clamp', { 'number,number,number': (v, lo, hi) => Math.max(lo, Math.min(hi, v)) }),
+  fract: math.typed('fract', { 'number': v => v - Math.floor(v) }),
+  pulse: math.typed('pulse', { 'number,number,number': (center, width, x) => { const t = Math.max(0, Math.min(1, 1 - Math.abs(x - center) / (width / 2))); return t * t * (3 - 2 * t); } }),
+}, { override: true });
+
+const $ = id => document.getElementById(id);
+const canvas = $('graph');
+const ctx = canvas.getContext('2d');
+const tooltip = $('tooltip');
+
+let tokens = [];
+let previewTemps = null;
+let hoveredIndex = -1;
+let generating = false;
+let abortController = null;
+let editingTempFn = false;
+
+function tempColor(t) {
+  const ratio = Math.max(0, Math.min(t / 2, 1));
+  const r = Math.round(30 + ratio * 175);
+  const g = Math.round(60 + (0.5 - Math.abs(ratio - 0.5)) * 60);
+  const b = Math.round(220 - ratio * 195);
+  return `rgb(${r},${g},${b})`;
+}
+
+function validateTemperatures() {
+  const expr = $('tempfn').value.trim();
+  const n = Math.min(Math.max(parseInt($('maxtokens').value) || 200, 1), 200);
+  const temps = [];
+  try {
+    const compiled = math.compile(expr);
+    for (let i = 0; i < n; i++) {
+      const v = compiled.evaluate({ i });
+      if (typeof v !== 'number' || !isFinite(v) || v < 0) {
+        return { error: `Invalid at i=${i}: got ${v}` };
+      }
+      temps.push(v);
+    }
+  } catch (e) {
+    return { error: e.message };
+  }
+  return { temps };
+}
+
+function drawGraph() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = rect.width, H = rect.height;
+
+  ctx.clearRect(0, 0, W, H);
+
+  const showPreview = editingTempFn || tokens.length === 0;
+  const isPreview = !generating && showPreview && previewTemps && previewTemps.length > 0;
+  const hasTokens = !isPreview && tokens.length > 0;
+  if (!isPreview && !hasTokens) return;
+
+  const pad = { l: 40, r: 16, t: 12, b: 24 };
+  const gw = W - pad.l - pad.r;
+  const gh = H - pad.t - pad.b;
+  const temps = isPreview ? previewTemps : tokens.map(t => t.temperature);
+  const n = temps.length;
+  const maxTemp = 2;
+
+  const xOf = i => pad.l + (n === 1 ? gw / 2 : (i / (n - 1)) * gw);
+  const yTemp = v => pad.t + gh - (v / maxTemp) * gh;
+
+  // axes
+  ctx.strokeStyle = '#2a2a3a';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t + gh); ctx.lineTo(pad.l + gw, pad.t + gh);
+  ctx.stroke();
+
+  // y labels
+  ctx.fillStyle = '#505060';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'right';
+  for (let v = 0; v <= 2; v += 0.5) {
+    const y = yTemp(v);
+    ctx.fillText(v.toFixed(1), pad.l - 4, y + 3);
+    ctx.strokeStyle = '#1a1a2a';
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + gw, y); ctx.stroke();
+  }
+
+  // entropy curve (only with real tokens)
+  if (hasTokens && $('show-entropy').checked && tokens.length > 1) {
+    const maxEntropy = Math.max(1, ...tokens.map(t => t.entropy));
+    const yEntropy = v => pad.t + gh - (v / maxEntropy) * gh;
+    ctx.strokeStyle = 'rgba(150, 150, 170, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    tokens.forEach((t, i) => {
+      const x = xOf(i), y = yEntropy(t.entropy);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  // temperature line
+  const alpha = isPreview ? 0.4 : 1;
+  ctx.lineWidth = isPreview ? 1.5 : 2;
+  ctx.beginPath();
+  temps.forEach((t, i) => {
+    const x = xOf(i), y = yTemp(t);
+    if (i === 0) { ctx.moveTo(x, y); } else {
+      const c = tempColor(t);
+      ctx.strokeStyle = isPreview ? c.replace('rgb', 'rgba').replace(')', `,${alpha})`) : c;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(xOf(i - 1), yTemp(temps[i - 1]));
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+
+  // points
+  temps.forEach((t, i) => {
+    const x = xOf(i), y = yTemp(t);
+    const isHov = i === hoveredIndex;
+    const r = isHov ? 5 : 3;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    const c = tempColor(t);
+    ctx.fillStyle = isPreview ? c.replace('rgb', 'rgba').replace(')', ',0.5)') : c;
+    ctx.fill();
+    if (isHov) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  });
+
+  // x label
+  ctx.fillStyle = '#505060';
+  ctx.textAlign = 'center';
+  ctx.fillText(isPreview ? `preview · ${n} tokens` : `${n} tokens`, pad.l + gw / 2, H - 4);
+}
+
+function showTooltip(x, y, info) {
+  tooltip.style.display = 'block';
+  tooltip.style.left = (x + 12) + 'px';
+  tooltip.style.top = (y - 10) + 'px';
+  if (info.text !== undefined) {
+    tooltip.innerHTML = `<b style="color:${tempColor(info.temperature)}">"${info.text.replace(/</g,'&lt;')}"</b><br>temp: ${info.temperature.toFixed(3)}<br>entropy: ${info.entropy.toFixed(3)}<br>P(token): ${(info.chosen_probability * 100).toFixed(1)}%`;
+  } else {
+    tooltip.innerHTML = `<b style="color:${tempColor(info.temperature)}">i=${info.index}</b><br>temp: ${info.temperature.toFixed(3)}`;
+  }
+}
+
+function hideTooltip() {
+  tooltip.style.display = 'none';
+}
+
+function currentDisplayTemps() {
+  const showPreview = editingTempFn || tokens.length === 0;
+  if (!generating && showPreview && previewTemps && previewTemps.length > 0) return previewTemps;
+  return null;
+}
+
+function setHovered(idx) {
+  if (hoveredIndex === idx) return;
+  hoveredIndex = idx;
+  drawGraph();
+  const preview = currentDisplayTemps();
+  document.querySelectorAll('#output .token').forEach(el => {
+    el.classList.toggle('hovered', parseInt(el.dataset.idx) === idx);
+  });
+  if (preview && idx >= 0 && idx < preview.length) {
+    const rect = canvas.getBoundingClientRect();
+    const pad = { l: 40, r: 16 };
+    const gw = rect.width - pad.l - pad.r;
+    const px = rect.left + pad.l + (idx / (preview.length - 1)) * gw;
+    const py = rect.top + 12;
+    showTooltip(px, py, { index: idx, temperature: preview[idx] });
+  } else if (idx >= 0 && idx < tokens.length) {
+    const el = document.querySelector(`#output .token[data-idx="${idx}"]`);
+    if (el) {
+      const r = el.getBoundingClientRect();
+      showTooltip(r.right, r.top, tokens[idx]);
+    }
+  } else {
+    hideTooltip();
+  }
+}
+
+// graph hover
+canvas.addEventListener('mousemove', e => {
+  const preview = currentDisplayTemps();
+  const n = preview ? preview.length : tokens.length;
+  if (n === 0) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const pad = { l: 40, r: 16 };
+  const gw = rect.width - pad.l - pad.r;
+  const ratio = (mx - pad.l) / gw;
+  const idx = Math.round(ratio * (n - 1));
+  if (idx >= 0 && idx < n) {
+    setHovered(idx);
+  }
+});
+
+canvas.addEventListener('mouseleave', () => setHovered(-1));
+
+// token hover
+$('output').addEventListener('mouseover', e => {
+  const el = e.target.closest('.token');
+  if (el) setHovered(parseInt(el.dataset.idx));
+});
+$('output').addEventListener('mouseout', e => {
+  const el = e.target.closest('.token');
+  if (el) setHovered(-1);
+});
+
+function updatePreview() {
+  if (generating) return;
+  const { temps, error } = validateTemperatures();
+  previewTemps = error ? null : temps;
+  $('error').textContent = $('tempfn').value.trim() && error ? error : '';
+  drawGraph();
+}
+
+$('tempfn').addEventListener('input', updatePreview);
+$('maxtokens').addEventListener('input', updatePreview);
+$('tempfn').addEventListener('focus', () => { editingTempFn = true; updatePreview(); });
+$('tempfn').addEventListener('blur', () => { editingTempFn = false; drawGraph(); });
+$('show-entropy').addEventListener('change', drawGraph);
+$('ctx-window').addEventListener('change', () => { $('ctx-window-size').disabled = !$('ctx-window').checked; });
+window.addEventListener('resize', drawGraph);
+updatePreview();
+
+function addToken(t) {
+  tokens.push(t);
+  const span = document.createElement('span');
+  span.className = 'token';
+  span.dataset.idx = t.index;
+  span.style.backgroundColor = tempColor(t.temperature);
+  span.style.color = t.temperature > 1.0 ? '#fff' : '#000';
+  span.textContent = t.text;
+  $('output').appendChild(span);
+  drawGraph();
+}
+
+async function generate() {
+  const { temps, error } = validateTemperatures();
+  if (error) { $('error').textContent = error; return; }
+  $('error').textContent = '';
+
+  const prompt = $('prompt').value.trim();
+  if (!prompt) { $('error').textContent = 'Enter a prompt'; return; }
+
+  generating = true;
+  abortController = new AbortController();
+  $('generate').style.display = 'none';
+  $('stop').style.display = '';
+  tokens = [];
+  $('output').innerHTML = '';
+  drawGraph();
+
+  try {
+    const res = await fetch('/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt, temperatures: temps,
+        context_window: $('ctx-window').checked ? parseInt($('ctx-window-size').value) || 10 : null,
+      }),
+      signal: abortController.signal,
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.slice(6));
+
+        if (data.error) {
+          $('error').textContent = data.error;
+          break;
+        }
+        if (data.retry) {
+          $('error').textContent = data.message || `Rate limited, retrying in ${data.wait}s...`;
+          continue;
+        }
+        if (data.done) break;
+        $('error').textContent = '';
+
+        addToken(data);
+        $('stop').textContent = `Stop (${data.index + 1} / ${temps.length})`;
+      }
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') $('error').textContent = e.message;
+  }
+
+  generating = false;
+  abortController = null;
+  $('stop').style.display = 'none';
+  $('stop').textContent = 'Stop';
+  $('generate').style.display = '';
+  $('generate').textContent = 'Generate';
+}
+
+$('generate').addEventListener('click', generate);
+$('stop').addEventListener('click', () => { if (abortController) abortController.abort(); });
+$('prompt').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && !generating) { e.preventDefault(); generate(); }
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const ov = $('fn-overlay');
+    if (ov.classList.contains('open')) { ov.classList.remove('open'); }
+    else if (abortController) { abortController.abort(); }
+  }
+});
+window.addEventListener('DOMContentLoaded', () => {
+  const ov = $('fn-overlay');
+  $('fn-help-open').addEventListener('click', () => ov.classList.add('open'));
+  ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('open'); });
+});
+</script>
+
+<div class="overlay-backdrop" id="fn-overlay">
+<div class="overlay">
+<h2>Temperature function reference</h2>
+<p>Expressions are evaluated with <a href="https://mathjs.org/docs/expressions/syntax.html" target="_blank" style="color:#7070a0">math.js</a>.
+The variable <code>i</code> is the token index (0, 1, 2, ...). The result should be a non-negative number (temperature). All built-in math.js functions (<code>sin</code>, <code>cos</code>, <code>abs</code>, <code>pow</code>, <code>sqrt</code>, <code>floor</code>, <code>ceil</code>, <code>min</code>, <code>max</code>, <code>mod</code>, <code>pi</code>, <code>e</code>, etc.) are available, plus these extras:</p>
+
+<table>
+<tr><th>Function</th><th>Description</th></tr>
+<tr><td><code>sin01(x)</code></td><td>Sine normalized to 0-1 range</td></tr>
+<tr><td><code>sin01ma(t, period, offset, m, a)</code></td><td>Sine wave with period, offset, multiply, and add</td></tr>
+<tr><td><code>triangle(t)</code></td><td>Triangle wave (period 1)</td></tr>
+<tr><td><code>square(t)</code></td><td>Square wave, 0 or 1 (period 1)</td></tr>
+<tr><td><code>pulse(center, width, x)</code></td><td>Smooth bump centered at <code>center</code></td></tr>
+<tr><td><code>stay01(t, period, offset, power)</code></td><td>Wave that holds at 0 and 1. Higher power = longer hold</td></tr>
+<tr><td><code>stay(t, lo, hi, period, offset, power)</code></td><td>Like stay01 but mapped to a custom range</td></tr>
+<tr><td><code>step(edge, x)</code></td><td>0 if x &lt; edge, else 1</td></tr>
+<tr><td><code>smoothstep(lo, hi, x)</code></td><td>Smooth 0-to-1 transition between lo and hi</td></tr>
+<tr><td><code>map(v, lo1, hi1, lo2, hi2)</code></td><td>Remap v from one range to another</td></tr>
+<tr><td><code>map01(v, lo, hi)</code></td><td>Remap v from 0-1 to lo-hi</td></tr>
+<tr><td><code>mix(a, b, t)</code></td><td>Linear interpolation: a + (b - a) * t</td></tr>
+<tr><td><code>clamp(v, lo, hi)</code></td><td>Clamp v to [lo, hi]</td></tr>
+<tr><td><code>fract(v)</code></td><td>Fractional part (sawtooth wave)</td></tr>
+<tr><td><code>snap(v, step)</code></td><td>Quantize v to nearest multiple of step</td></tr>
+<tr><td><code>smin(a, b, k)</code></td><td>Smooth minimum (higher k = sharper)</td></tr>
+<tr><td><code>noise(x)</code></td><td>Deterministic pseudo-random, 0-1</td></tr>
+</table>
+</div>
+</div>
+
+</body>
+</html>
