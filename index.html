@@ -2,6 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="title"                   content="Thermostat" />
+<meta name="description"             content="How temperature affects LLM output" />
+<meta property="og:type"             content="website" />
+<meta property="og:url"              content="https://thermostat.ulyssepence.com/" />
+<meta property="og:title"            content="Thermostat" />
+<meta property="og:description"      content="How temperature affects LLM output" />
+<meta property="twitter:card"        content="summary_large_image" />
+<meta property="twitter:url"         content="https://thermostat.ulyssepence.com/" />
+<meta property="twitter:title"       content="Thermostat" />
+<meta property="twitter:description" content="How temperature affects LLM output" />
+<meta property="twitter:image"       content="https://thermostat.ulyssepence.com/static/card.png" />
+<meta property="twitter:creator"     content="@ulyssepence" />
+<meta property="twitter:site"        content="@ulyssepence" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Thermostat</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.4.0/math.min.js"></script>
@@ -48,10 +61,12 @@ canvas { width: 100%; height: 160px; background: #14141f; border-radius: 6px; bo
 .overlay td:first-child { white-space: nowrap; color: #a0a0e0; }
 .fn-help-link { color: #7070a0; font-size: 11px; cursor: pointer; border-bottom: 1px dotted #7070a0; }
 .fn-help-link:hover { color: #9090c0; }
+.about-link { color: #606070; font-size: 13px; cursor: pointer; font-weight: 400; }
+.about-link:hover { color: #9090c0; }
 </style>
 </head>
 <body>
-<h1>Thermostat</h1>
+<h1>Thermostat <span class="about-link" id="about-open">(?)</span></h1>
 
 <div class="controls">
   <label>Prompt
@@ -69,10 +84,6 @@ canvas { width: 100%; height: 160px; background: #14141f; border-radius: 6px; bo
     <button id="stop" style="display:none">Stop</button>
   </div>
   <div class="error" id="error"></div>
-  <div style="display:flex;gap:12px;margin-top:4px;align-items:center">
-    <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="ctx-window" checked> context window
-      <input type="number" id="ctx-window-size" value="10" min="1" max="200" style="width:50px"> tokens</label>
-  </div>
 </div>
 
 <div id="graph-container">
@@ -339,7 +350,6 @@ $('maxtokens').addEventListener('input', updatePreview);
 $('tempfn').addEventListener('focus', () => { editingTempFn = true; updatePreview(); });
 $('tempfn').addEventListener('blur', () => { editingTempFn = false; drawGraph(); });
 $('show-entropy').addEventListener('change', drawGraph);
-$('ctx-window').addEventListener('change', () => { $('ctx-window-size').disabled = !$('ctx-window').checked; });
 window.addEventListener('resize', drawGraph);
 updatePreview();
 
@@ -381,7 +391,7 @@ async function generate() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         prompt, temperatures: temps,
-        context_window: $('ctx-window').checked ? parseInt($('ctx-window-size').value) || 10 : null,
+        context_window: 10,
       }),
       signal: abortController.signal,
     });
@@ -437,8 +447,10 @@ $('prompt').addEventListener('keydown', e => {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    const ov = $('fn-overlay');
-    if (ov.classList.contains('open')) { ov.classList.remove('open'); }
+    const about = $('about-overlay');
+    const fn = $('fn-overlay');
+    if (about.classList.contains('open')) { about.classList.remove('open'); }
+    else if (fn.classList.contains('open')) { fn.classList.remove('open'); }
     else if (abortController) { abortController.abort(); }
   }
 });
@@ -446,8 +458,18 @@ window.addEventListener('DOMContentLoaded', () => {
   const ov = $('fn-overlay');
   $('fn-help-open').addEventListener('click', () => ov.classList.add('open'));
   ov.addEventListener('click', e => { if (e.target === ov) ov.classList.remove('open'); });
+  const aboutOv = $('about-overlay');
+  $('about-open').addEventListener('click', () => aboutOv.classList.add('open'));
+  aboutOv.addEventListener('click', e => { if (e.target === aboutOv) aboutOv.classList.remove('open'); });
 });
 </script>
+
+<div class="overlay-backdrop" id="about-overlay">
+<div class="overlay">
+<h2>About Thermostat</h2>
+<p>Details coming soon.</p>
+</div>
+</div>
 
 <div class="overlay-backdrop" id="fn-overlay">
 <div class="overlay">

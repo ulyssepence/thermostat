@@ -8,10 +8,12 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 import openai
 
 app = FastAPI()
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 FIREWORKS_API_KEY = os.environ.get("FIREWORKS_API_KEY", "")
 MODEL = "accounts/fireworks/models/mixtral-8x22b-instruct"
